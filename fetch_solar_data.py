@@ -6,7 +6,6 @@ import signal
 import sys
 
 import click
-import enlighten
 from zeep import Transport, Settings, Client
 from zeep.cache import InMemoryCache
 from zeep.exceptions import Fault
@@ -110,7 +109,6 @@ def process_file(input_file: pathlib.Path, api_key, mastr_number, index, output,
 
     logger.info(f'Setting up process pool with {parallelization} processes')
     process_pool = []
-    manager = enlighten.get_manager()
 
     for i in range(parallelization):
         output_file = output / (input_file.name.replace('.csv', '') + f'.out-{i}.csv')
