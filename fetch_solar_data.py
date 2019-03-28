@@ -65,7 +65,7 @@ def process_units(queue: multiprocessing.Queue, process_no, api_key, mastr_numbe
     signal.signal(signal.SIGINT, terminate)
 
     wsdl = 'https://www.marktstammdatenregister.de/MaStRAPI/wsdl/mastr.wsdl'
-    transport = Transport(cache=InMemoryCache())
+    transport = Transport(cache=InMemoryCache(), operation_timeout=180)
     settings = Settings(strict=False, xml_huge_tree=True)
     client = Client(wsdl=wsdl, transport=transport, settings=settings)
     client_bind = client.bind('Marktstammdatenregister', 'Anlage')
