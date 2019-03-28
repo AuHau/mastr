@@ -113,7 +113,7 @@ def process_file(input_file: pathlib.Path, api_key, mastr_number, index, output,
     manager = enlighten.get_manager()
 
     for i in range(parallelization):
-        output_file = output / input_file.name.replace('.csv', f'.out-{i}.csv')
+        output_file = output / (input_file.name.replace('.csv', '') + f'.out-{i}.csv')
         proc = multiprocessing.Process(target=process_units, args=(queue, i, api_key, mastr_number, output_file))
         proc.start()
         process_pool.append(proc)
