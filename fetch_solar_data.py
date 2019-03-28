@@ -17,7 +17,6 @@ import backoff
 QUEUE_SIZE = 20
 BATCH_CHUNK_SIZE = 100
 ERRORS_LIMIT = 20
-TERMINATION_SENTINEL = object()
 
 field_names = ['Ergebniscode', 'AufrufVeraltet', 'AufrufLebenszeitEnde', 'AufrufVersion', 'EinheitMastrNummer',
                'DatumLetzteAktualisierung', 'LokationMastrNummer', 'NetzbetreiberpruefungStatus',
@@ -80,7 +79,7 @@ def process_units(queue: multiprocessing.Queue, process_no, api_key, mastr_numbe
             unit_mastr_numbers = queue.get(block=True)
             logger.info(f'Process {process_no}: Processing next batch')
 
-            if unit_mastr_numbers == TERMINATION_SENTINEL:
+            if unit_mastr_numbers is None:
                 logger.info(f'Process {process_no}: Received termination sentinel -> no more data to process.')
                 break
 
@@ -143,7 +142,7 @@ def process_file(input_file: pathlib.Path, api_key, mastr_number, index, output,
 
             if finish:
                 for _ in range(parallelization):
-                    queue.put(TERMINATION_SENTINEL)
+                    queue.put(None)
                 return
 
 
