@@ -6,6 +6,7 @@ import signal
 import sys
 
 import click
+from requests import ReadTimeout
 from zeep import Transport, Settings, Client
 from zeep.cache import InMemoryCache
 from zeep.exceptions import Fault
@@ -42,7 +43,7 @@ back_logger = logging.getLogger('backoff')
 
 ##################
 
-@backoff.on_exception(backoff.expo, Fault, max_tries=3, logger=back_logger)
+@backoff.on_exception(backoff.expo, (Fault, ReadTimeout), factor=5, max_tries=3, logger=back_logger)
 def fetch_unit(client_bind, api_key, mastr_number, unit_number):
     return client_bind.GetEinheitSolar(apiKey=api_key, marktakteurMastrNummer=mastr_number,
                                        einheitMastrNummer=unit_number)
@@ -51,6 +52,7 @@ def fetch_unit(client_bind, api_key, mastr_number, unit_number):
 def process_units(queue: multiprocessing.Queue, process_no, api_key, mastr_number, output):
     logging.getLogger('zeep').setLevel(logging.CRITICAL)
     logging.basicConfig(stream=sys.stderr, level=logging.INFO)
+    output_exists = output.exists()
 
     force_termination = False
     def terminate(*args):
@@ -65,14 +67,16 @@ def process_units(queue: multiprocessing.Queue, process_no, api_key, mastr_numbe
     signal.signal(signal.SIGINT, terminate)
 
     wsdl = 'https://www.marktstammdatenregister.de/MaStRAPI/wsdl/mastr.wsdl'
-    transport = Transport(cache=InMemoryCache(), operation_timeout=180)
+    transport = Transport(cache=InMemoryCache(), operation_timeout=60)
     settings = Settings(strict=False, xml_huge_tree=True)
     client = Client(wsdl=wsdl, transport=transport, settings=settings)
     client_bind = client.bind('Marktstammdatenregister', 'Anlage')
 
-    with output.open('w') as f:
+    with output.open('a') as f:
         writer = csv.DictWriter(f, field_names)
-        writer.writeheader()
+
+        if not output_exists:
+            writer.writeheader()
 
         while True:
             unit_mastr_numbers = queue.get(block=True)
@@ -80,7 +84,7 @@ def process_units(queue: multiprocessing.Queue, process_no, api_key, mastr_numbe
 
             if unit_mastr_numbers is None:
                 logger.info(f'Process {process_no}: Received termination sentinel -> no more data to process.')
-                break
+                return
 
             errors_count = 0
             for unit_number in unit_mastr_numbers:
@@ -104,7 +108,7 @@ def process_units(queue: multiprocessing.Queue, process_no, api_key, mastr_numbe
                     errors_count += 1
 
 
-def process_file(input_file: pathlib.Path, api_key, mastr_number, index, output, parallelization):
+def process_file(input_file: pathlib.Path, api_key, mastr_number, index, output, parallelization, start_line):
     queue = multiprocessing.Queue(maxsize=QUEUE_SIZE)
 
     logger.info(f'Setting up process pool with {parallelization} processes')
@@ -119,6 +123,10 @@ def process_file(input_file: pathlib.Path, api_key, mastr_number, index, output,
     with input_file.open('r', newline='') as f:
         reader = csv.reader(f)
         finish = False
+
+        if start_line > 0:
+            for _ in range(start_line):
+                next(reader)
 
         while True:
             try:
@@ -144,10 +152,37 @@ def process_file(input_file: pathlib.Path, api_key, mastr_number, index, output,
                 return
 
 
+def _process_inputs(inputs):
+    output = []
+    for input in inputs:
+        if ':' in input:
+            input_splits = input.split(':')
+
+            if len(input_splits) > 2:
+                raise Exception(f'Unknown format of input! Expected only one \':\'! Got: {input}')
+
+            input_path = pathlib.Path(input_splits[0])
+
+            if not input_path.exists():
+                raise Exception(f'Path does not exist: {input_path}')
+
+            output.append((input_path, int(input_splits[1])))
+        else:
+            input_path = pathlib.Path(input)
+
+            if not input_path.exists():
+                raise Exception(f'Path does not exist: {input_path}')
+
+            output.append((input_path, 0))
+
+    return output
+
+
 @click.command()
 @click.option('-a', '--api-key', envvar='API_KEY')
 @click.option('-m', '--mastr-number', envvar='MASTR_NUMBER')
-@click.option('-i', '--input', help='Input CSV files', multiple=True, type=click.Path(exists=True, readable=True))
+@click.option('-i', '--input', help='Input CSV files, if the path is ending with :<number> it will start '
+                                    'processing the file from this line', multiple=True)
 @click.option('-n', '--index', type=click.INT,
               help='Index of column in input CSV where the Mastr\'s numbers are placed.')
 @click.option('-p', '--parallelization', type=click.INT, default=multiprocessing.cpu_count(),
@@ -160,9 +195,9 @@ def main(api_key, mastr_number, input, index, output, parallelization):
     Script that will fetch detailed data of solar units specified by mastr numbers in the input CSV file and specific
     column of this CSV.
     """
-    for input_file in input:
+    for input_file, start_line in _process_inputs(input):
         logger.info(f'Processing file {input_file}')
-        process_file(pathlib.Path(input_file), api_key, mastr_number, index, pathlib.Path(output), parallelization)
+        process_file(input_file, api_key, mastr_number, index, pathlib.Path(output), parallelization, start_line)
 
 
 if __name__ == '__main__':
