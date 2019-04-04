@@ -43,7 +43,15 @@ back_logger = logging.getLogger('backoff')
 
 ##################
 
-@backoff.on_exception(backoff.expo, (Fault, ReadTimeout), factor=5, max_tries=3, logger=back_logger)
+def on_give_up(_):
+    exception = sys.exc_info()[1]
+
+    try:
+        back_logger.warning(f'Backoff gave up! Details: code={exception.code}; detail={exception.detail}; message={exception.message}')
+    except AttributeError:
+        back_logger.warning(f'Backoff gave up! Unknown exception for details. {exception}')
+
+@backoff.on_exception(backoff.expo, (Fault, ReadTimeout), factor=5, max_tries=3, logger=back_logger, on_giveup=on_give_up)
 def fetch_unit(client_bind, api_key, mastr_number, unit_number):
     return client_bind.GetEinheitSolar(apiKey=api_key, marktakteurMastrNummer=mastr_number,
                                        einheitMastrNummer=unit_number)
